@@ -1,0 +1,122 @@
+// ============================================================================
+// Tufani — Prisma schema (PostgreSQL)
+// Prices are stored as integers in "bani" (1 RON = 100 bani) to avoid
+// floating point issues. Orders keep a full price snapshot of every item.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Category {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  slug      String    @unique
+  createdAt DateTime  @default(now())
+  products  Product[]
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String
+  /// Array of { label, value } pairs shown in the "Specificații" table
+  specs       Json     @default("[]")
+  /// Price in bani (1 RON = 100 bani)
+  price       Int
+  /// Discounted price in bani; when set, it is the price actually charged
+  salePrice   Int?
+  stock       Int      @default(0)
+  /// Image URLs (first one is the main image)
+  images      String[]
+  active      Boolean  @default(true)
+  /// Featured products (exactly 4 active) are shown in the hero carousel
+  featured    Boolean  @default(false)
+  /// Pastel background color used by the hero carousel (hex, e.g. #FFE8DD)
+  heroColor   String?
+  /// Units sold — incremented by the Stripe webhook, used for sorting
+  popularity  Int      @default(0)
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  orderItems  OrderItem[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([categoryId])
+  @@index([active, featured])
+}
+
+enum OrderStatus {
+  NOUA      // created at checkout, payment not confirmed yet
+  PLATITA   // payment confirmed by the Stripe webhook
+  EXPEDIATA // shipped (AWB set by admin)
+  LIVRATA   // delivered
+  ANULATA   // cancelled / payment session expired
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  orderNumber     String      @unique
+  status          OrderStatus @default(NOUA)
+  customerName    String
+  email           String
+  phone           String
+  address         String
+  county          String
+  city            String
+  /// Snapshot amounts in bani, frozen at checkout time
+  subtotal        Int
+  shippingCost    Int
+  total           Int
+  awb             String?
+  stripeSessionId String?     @unique
+  items           OrderItem[]
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  /// Nullable so products can be deleted without losing order history
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  /// Snapshot fields — never read from Product after the order is placed
+  name      String
+  image     String
+  /// Unit price in bani at the moment of purchase
+  price     Int
+  quantity  Int
+
+  @@index([orderId])
+}
+
+model AdminUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
+model StoreSettings {
+  /// Single-row table (id is always 1)
+  id                    Int    @id @default(1)
+  storeName             String
+  contactEmail          String
+  contactPhone          String
+  /// Shipping cost in bani
+  shippingCost          Int
+  /// Orders at or above this subtotal (bani) get free shipping
+  freeShippingThreshold Int
+}
